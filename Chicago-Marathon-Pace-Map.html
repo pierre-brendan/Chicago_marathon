@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chicago Marathon Pace Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+html,body{margin:0}
+/* Layout: control strip on top, course map (left, sticky) beside live position cards + split table (right); stacks on phones. */
+:root{
+  --bg:#f6f8f9; --surface:#ffffff; --ink:#14212b; --muted:#5d6d78; --line:#d9e2e7;
+  --lake:#cfe9f6; --lake-ink:#6aa9c8; --street:#e6ecef; --river:#8fc4dd;
+  --course:#c8102e; --fast:#1c6e8c; --base:#c8102e; --slow:#b4770e; --limit:#5f6b73;
+  --chip:#eef3f5;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f161c; --surface:#16212a; --ink:#e6eef2; --muted:#93a5b0; --line:#273641;
+  --lake:#12324a; --lake-ink:#4f89aa; --street:#1d2a33; --river:#2f6f91;
+  --course:#ff4d61; --fast:#4fb3d9; --base:#ff4d61; --slow:#e8a93a; --limit:#9aa9b3; --chip:#1d2a33; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f161c; --surface:#16212a; --ink:#e6eef2; --muted:#93a5b0; --line:#273641;
+  --lake:#12324a; --lake-ink:#4f89aa; --street:#1d2a33; --river:#2f6f91;
+  --course:#ff4d61; --fast:#4fb3d9; --base:#ff4d61; --slow:#e8a93a; --limit:#9aa9b3; --chip:#1d2a33; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:18px 32px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1;margin:0;letter-spacing:.01em;text-transform:uppercase;text-wrap:balance}
+h1 .star{color:var(--course)}
+.sub{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.controls{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 16px;align-items:end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.field input{font:500 16px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%}
+.field input:focus-visible,button:focus-visible{outline:2px solid var(--course);outline-offset:2px}
+.field .hint{font-size:11px;color:var(--muted)}
+.clock{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;border-top:1px dashed var(--line);padding-top:12px}
+.clock .now{font-family:var(--display);font-size:30px;font-weight:600;line-height:1;min-width:6.2ch;font-variant-numeric:tabular-nums}
+.clock input[type=range]{flex:1 1 220px;accent-color:var(--course)}
+button{font:600 13px var(--body);color:var(--ink);background:var(--chip);border:1px solid var(--line);border-radius:6px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--course);border-color:var(--course);color:#fff}
+.main{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.main{grid-template-columns:minmax(0,1fr)}}
+.mappanel{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);height:calc(100vh - 40px);min-height:520px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+@media (max-width:860px){.mappanel{position:relative;top:0;height:72vh;min-height:440px}}
+#map{width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
+#map.zoomed{touch-action:none}
+#map.drag{cursor:grabbing}
+.mapctl{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.mapctl button{width:36px;height:36px;padding:0;font-size:18px;line-height:1;background:var(--surface)}
+.mapctl button.fit{font-size:11px}
+.legend{position:absolute;left:10px;bottom:10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;display:flex;flex-direction:column;gap:4px}
+.legend span{display:flex;align-items:center;gap:7px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.cards{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--surface);border:1px solid var(--line);border-top:4px var(--bs,solid) var(--c);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.card .lab{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.card .mile{font-family:var(--display);font-size:32px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.card .mile small{font-size:15px;font-weight:600;color:var(--muted);margin-left:3px}
+.card .where{font-size:13px;line-height:1.3}
+.card .meta{font:12px var(--mono);color:var(--muted)}
+.tablebox{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--surface)}
+td.t{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.m{font-family:var(--display);font-weight:700;font-size:17px}
+td.loc{white-space:normal;min-width:170px}
+td.loc small{display:block;color:var(--muted);font-size:11px}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--chip)}
+tbody tr.passed td{color:var(--muted)}
+tbody tr.passed td.m{text-decoration:line-through;text-decoration-thickness:1px}
+tbody tr.key td{background:color-mix(in srgb,var(--course) 7%,transparent)}
+th.f,td.f{color:var(--fast)} th.b,td.b{color:var(--base)} th.s,td.s{color:var(--slow)} th.l,td.l{color:var(--limit)}
+tbody tr.passed td.f,tbody tr.passed td.b,tbody tr.passed td.s,tbody tr.passed td.l{opacity:.55}
+.note{font-size:12px;color:var(--muted);max-width:75ch}
+svg text{font-family:var(--body)}
+@media (prefers-reduced-motion:reduce){.pulse{display:none}}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1><span class="star">✶</span> Chicago Marathon Pace Map</h1>
+      <p class="sub">Sunday, Oct 11, 2026 · Wave 2 gun at 8:00 AM. Where a runner is on the course at any clock time, for a base pace and a faster and slower band around it, plus the 6:30 course limit.</p>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="Pace settings">
+    <div class="field"><label for="pace">Base pace (min/mi)</label><input id="pace" value="13:00" inputmode="numeric"><span class="hint" id="paceFinish"></span></div>
+    <div class="field"><label for="band">Faster / slower band (%)</label><input id="band" type="number" min="0" max="50" step="1" value="10"><span class="hint" id="bandHint"></span></div>
+    <div class="field"><label for="start">Start time (cross the mat)</label><input id="start" type="time" value="08:00"><span class="hint">Corral start may add 10–25 min</span></div>
+    <div class="field"><label for="goal">Or set a finish time</label><input id="goal" placeholder="5:40:47" inputmode="numeric"><span class="hint">h:mm:ss → sets base pace</span></div>
+    <div class="clock">
+      <span class="field" style="flex:0 0 auto"><label for="at">Check clock time</label><input id="at" type="time" step="60" style="width:130px"></span>
+      <span class="now" id="nowLabel">—</span>
+      <input id="slider" type="range" min="0" max="400" step="1" aria-label="Clock time">
+      <button id="play" class="primary" type="button">▶ Play</button>
+    </div>
+  </section>
+
+  <div class="main">
+    <div class="mappanel">
+      <svg id="map" role="img" aria-label="Chicago Marathon course map with runner positions"></svg>
+      <div class="mapctl">
+        <button type="button" id="zin" aria-label="Zoom in">+</button>
+        <button type="button" id="zout" aria-label="Zoom out">−</button>
+        <button type="button" id="zfit" class="fit" aria-label="Show full course">FIT</button>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="side">
+      <div class="cards" id="cards"></div>
+      <div class="tablebox">
+        <table>
+          <thead><tr><th>Mile</th><th>Location</th><th class="f" id="hf">Faster</th><th class="b" id="hb">Base</th><th class="s" id="hs">Slower</th><th class="l" id="hl">Limit</th></tr></thead>
+          <tbody id="splits"></tbody>
+        </table>
+      </div>
+      <p class="note">Mile-marker locations follow the official marker intersections used in recent years; the drawn route is a street-level approximation, so positions between markers are estimates. Times assume even pacing from your mat-crossing time, not gun time. The Limit column is the 6.5-hour course time limit measured from your start time (14:53/mi); runners behind it may be asked to move to the sidewalks as streets reopen. Tap a row to zoom the map to that marker.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// [lat, lng, mile (anchor) , label, neighborhood]
+const W = [
+[41.8807,-87.6205,0,'Start · Columbus Dr & Monroe St','Grant Park'],
+[41.8848,-87.6207],[41.8890,-87.6203],[41.8919,-87.6202],[41.8918,-87.6243],
+[41.8917,-87.6257,1,'Grand Ave & Rush St','Streeterville'],
+[41.8916,-87.6282],[41.8870,-87.6280],[41.8846,-87.6278],
+[41.8794,-87.6277,2,'State St & Adams St','The Loop'],
+[41.8781,-87.6277],[41.8781,-87.6324],[41.8868,-87.6325],
+[41.8882,-87.6326,3,'333 N LaSalle Dr','River North'],
+[41.8966,-87.6327],
+[41.9030,-87.6328,4,'LaSalle Dr & Elm St','Near North'],
+[41.9090,-87.6330],[41.9112,-87.6325],[41.9150,-87.6338],
+[41.9185,-87.6348,5,'Stockton Dr at Farm-in-the-Zoo','Lincoln Park'],
+[41.9235,-87.6352],
+[41.9290,-87.6358,6,'Cannon Dr near North Pond','Lincoln Park'],
+[41.9335,-87.6365],[41.9380,-87.6375],
+[41.9423,-87.6385,7,'3300 N Inner Lake Shore Dr','Lake View East'],
+[41.9470,-87.6400],[41.9505,-87.6445],
+[41.9530,-87.6495,8,'Broadway & Sheridan Rd (north turn)','Lake View'],
+[41.9470,-87.6462],[41.9400,-87.6445],
+[41.9385,-87.6442,9,'Broadway & Briar Pl','Lake View East'],
+[41.9327,-87.6440],[41.9290,-87.6420],
+[41.9256,-87.6403,10,'Clark St & Fullerton Pkwy','Lincoln Park'],
+[41.9195,-87.6365],[41.9180,-87.6386],
+[41.9112,-87.6386,11,'Sedgwick St & North Ave','Old Town'],
+[41.9111,-87.6345],
+[41.9001,-87.6343,12,'Wells St & Walton St','Near North'],
+[41.8966,-87.6343],[41.8866,-87.6340],[41.8857,-87.6339],
+[41.8857,-87.6372,13,'Wacker Dr & Lake St','The Loop'],
+[41.8846,-87.6372,13.1094,'Half · Wacker Dr & Randolph St','The Loop'],
+[41.8806,-87.6372],[41.8806,-87.6474],[41.8794,-87.6474],
+[41.8794,-87.6488,14,'Adams St at Green St','Greektown'],
+[41.8794,-87.6668,15,'Adams St & Ashland Ave','Near West Side'],
+[41.8792,-87.6765],[41.8778,-87.6765],
+[41.8779,-87.6700,16,'Jackson Blvd at Paulina St','United Center area'],
+[41.8782,-87.6488,17,'Jackson Blvd & Green St','Greektown'],
+[41.8782,-87.6474],[41.8694,-87.6472],
+[41.8694,-87.6540,18,'Taylor St & Aberdeen St','Little Italy'],
+[41.8693,-87.6603],
+[41.8607,-87.6603,19,'Loomis St at 15th–16th St','University Village'],
+[41.8577,-87.6603],[41.8578,-87.6466],
+[41.8565,-87.6466,20,'Halsted St & 19th St','Pilsen'],
+[41.8530,-87.6465],
+[41.8530,-87.6392,21,'Cermak Rd near Grove St','Chinatown'],
+[41.8530,-87.6320],[41.8457,-87.6320],
+[41.8456,-87.6302,22,'26th St at Federal St','Near South Side'],
+[41.8455,-87.6237],
+[41.8362,-87.6236,23,'Michigan Ave & 32nd St','Bronzeville'],
+[41.8345,-87.6236],[41.8345,-87.6266],[41.8310,-87.6266],[41.8311,-87.6217],
+[41.8384,-87.6218,24,'Indiana Ave near 31st St','South Commons'],
+[41.8530,-87.6220],
+[41.8545,-87.6240,25,'Michigan Ave & 21st St','South Loop'],
+[41.8674,-87.6245],
+[41.8674,-87.6220,26,'Roosevelt Rd & Indiana Ave','South Loop'],
+[41.8674,-87.6195],
+[41.8702,-87.6197,26.2188,'Finish · Columbus Dr','Grant Park']
+];
+const FULL = 26.2188;
+const LAKE = [[41.962,-87.6345],[41.950,-87.6320],[41.940,-87.6300],[41.926,-87.6270],[41.912,-87.6240],[41.902,-87.6235],[41.8975,-87.6170],[41.8925,-87.6140],[41.8890,-87.6125],[41.8800,-87.6135],[41.8670,-87.6145],[41.8550,-87.6110],[41.8450,-87.6075],[41.8350,-87.6060],[41.8220,-87.6040]];
+const RIVER = [
+ [[41.8888,-87.6125],[41.8886,-87.6240],[41.8876,-87.6300],[41.8869,-87.6375],[41.8900,-87.6395],[41.8965,-87.6425],[41.9050,-87.6470],[41.9150,-87.6560]],
+ [[41.8869,-87.6375],[41.8790,-87.6378],[41.8700,-87.6372],[41.8640,-87.6362],[41.8580,-87.6345],[41.8520,-87.6395],[41.8490,-87.6480],[41.8445,-87.6600],[41.8400,-87.6750]]
+];
+const HOODS = [['LAKE VIEW',41.9455,-87.6555],['LINCOLN PARK',41.9215,-87.6480],['OLD TOWN',41.9075,-87.6420],['RIVER NORTH',41.8930,-87.6405],['THE LOOP',41.8820,-87.6300],['WEST LOOP',41.8845,-87.6580],['UNITED CENTER',41.8812,-87.6745],['LITTLE ITALY',41.8660,-87.6530],['PILSEN',41.8540,-87.6560],['CHINATOWN',41.8495,-87.6345],['BRONZEVILLE',41.8330,-87.6170],['SOUTH LOOP',41.8615,-87.6300],['GRANT PARK',41.8760,-87.6170]];
+
+// ---------- projection ----------
+const LAT0 = 41.89, COS = Math.cos(LAT0*Math.PI/180), K = 9000;
+const P = (lat,lng)=>[ (lng+87.70)*COS*K, (41.97-lat)*K ];
+const pts = W.map(w=>P(w[0],w[1]));
+// geometric cumulative length, then map to race miles via anchors
+const geo=[0]; for(let i=1;i<pts.length;i++){geo.push(geo[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));}
+const anchors = W.map((w,i)=>w[2]!==undefined?i:-1).filter(i=>i>=0);
+const mileAt = new Array(pts.length);
+for(let a=0;a<anchors.length-1;a++){const i0=anchors[a],i1=anchors[a+1],m0=W[i0][2],m1=W[i1][2];
+  for(let i=i0;i<=i1;i++) mileAt[i]=m0+(m1-m0)*(geo[i]-geo[i0])/(geo[i1]-geo[i0]||1);}
+function posAtMile(m){
+  m=Math.max(0,Math.min(FULL,m));
+  for(let i=1;i<pts.length;i++){ if(m<=mileAt[i]){const t=(m-mileAt[i-1])/((mileAt[i]-mileAt[i-1])||1);
+    return [pts[i-1][0]+(pts[i][0]-pts[i-1][0])*t, pts[i-1][1]+(pts[i][1]-pts[i-1][1])*t];}}
+  return pts[pts.length-1];
+}
+const MARKERS = anchors.map(i=>({mile:W[i][2],label:W[i][3],hood:W[i][4],xy:pts[i]}));
+
+// ---------- svg ----------
+const svg=document.getElementById('map'), NS='http://www.w3.org/2000/svg';
+const el=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);(p||svg).appendChild(e);return e;};
+const d=arr=>arr.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+const PAD=40; const BASE={x:Math.min(...xs)-PAD,y:Math.min(...ys)-PAD,w:0,h:0};
+BASE.w=(Math.max(...xs)+PAD+60)-BASE.x; BASE.h=(Math.max(...ys)+PAD)-BASE.y;
+let view={...BASE};
+svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+el('rect',{x:-2000,y:-2000,width:6000,height:6000,fill:'var(--surface)'});
+// lake
+const lakePts=LAKE.map(p=>P(p[0],p[1])); const E=4000;
+el('path',{d:d(lakePts)+` L ${E} ${lakePts[lakePts.length-1][1]} L ${E} ${lakePts[0][1]-200} L ${lakePts[0][0]} ${lakePts[0][1]-200} Z`,fill:'var(--lake)'});
+el('path',{d:d(lakePts),fill:'none',stroke:'var(--lake-ink)','stroke-width':1,'vector-effect':'non-scaling-stroke',opacity:.6});
+const lakeLabel=el('text',{x:P(41.90,-87.603)[0],y:P(41.90,-87.603)[1],fill:'var(--lake-ink)','font-size':13,'font-weight':600,'letter-spacing':'3','writing-mode':'tb','text-anchor':'middle'}); lakeLabel.textContent='LAKE MICHIGAN';
+RIVER.forEach(r=>el('path',{d:d(r.map(p=>P(p[0],p[1]))),fill:'none',stroke:'var(--river)','stroke-width':5,'stroke-linecap':'round','stroke-linejoin':'round',opacity:.55}));
+const hoodG=el('g',{});
+HOODS.forEach(h=>{const [x,y]=P(h[1],h[2]);const t=el('text',{x,y,'text-anchor':'middle',fill:'var(--muted)','font-size':9.5,'font-weight':600,'letter-spacing':'1.5',opacity:.75},hoodG);t.textContent=h[0];});
+// course
+el('path',{d:d(pts),fill:'none',stroke:'var(--surface)','stroke-width':9,'stroke-linejoin':'round','stroke-linecap':'round'});
+el('path',{d:d(pts),fill:'none',stroke:'var(--course)','stroke-width':4,'stroke-linejoin':'round','stroke-linecap':'round',opacity:.9});
+const progress=el('path',{d:'',fill:'none',stroke:'var(--ink)','stroke-width':4,'stroke-linejoin':'round','stroke-linecap':'round',opacity:.35});
+// markers
+const mG=el('g',{});
+const markerEls=MARKERS.map(m=>{
+  const g=el('g',{style:'cursor:pointer'},mG);
+  const isEnd=m.mile===0||m.mile===FULL, isHalf=m.mile>13&&m.mile<14;
+  const c=el('circle',{cx:m.xy[0],cy:m.xy[1],r:7,fill:isEnd?'var(--ink)':'var(--surface)',stroke:isEnd?'var(--ink)':'var(--course)','stroke-width':1.6,'vector-effect':'non-scaling-stroke'},g);
+  const t=el('text',{x:m.xy[0],y:m.xy[1],'text-anchor':'middle','dominant-baseline':'central','font-size':7.5,'font-weight':700,fill:isEnd?'var(--surface)':'var(--ink)'},g);
+  t.textContent=m.mile===0?'S':m.mile===FULL?'F':isHalf?'½':m.mile;
+  const ti=el('title',{},g); ti.textContent=m.label;
+  g.addEventListener('click',()=>focusOn(m.xy,2.6));
+  return {c,t,m};
+});
+// runners
+const LIMIT_SEC=6.5*3600;
+const NAME={fast:'Faster',base:'Base',slow:'Slower',limit:'Course limit'};
+const RUN=[{key:'limit',col:'var(--limit)'},{key:'fast',col:'var(--fast)'},{key:'base',col:'var(--base)'},{key:'slow',col:'var(--slow)'}];
+const rG=el('g',{});
+RUN.forEach(r=>{
+  r.g=el('g',{},rG);
+  r.pulse=el('circle',{r:12,fill:r.col,opacity:.25,class:'pulse'},r.g);
+  el('animate',{attributeName:'r',values:'9;18;9',dur:'2s',repeatCount:'indefinite'},r.pulse);
+  el('animate',{attributeName:'opacity',values:'.35;0;.35',dur:'2s',repeatCount:'indefinite'},r.pulse);
+  r.dot=r.key==='limit'?el('circle',{r:7,fill:'var(--surface)',stroke:r.col,'stroke-width':3,'stroke-dasharray':'3 2','vector-effect':'non-scaling-stroke'},r.g):el('circle',{r:7,fill:r.col,stroke:'var(--surface)','stroke-width':2.5,'vector-effect':'non-scaling-stroke'},r.g);
+  if(r.key==='limit')r.pulse.remove();
+});
+
+function applyView(){
+  svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);
+  const s=view.w/BASE.w; // <1 when zoomed in
+  const k=Math.max(.35,Math.min(1,s*1.15));
+  markerEls.forEach(({c,t})=>{c.setAttribute('r',7*k);t.setAttribute('font-size',7.5*k);});
+  RUN.forEach(r=>{r.dot.setAttribute('r',7*k);});
+  hoodG.querySelectorAll('text').forEach(t=>t.setAttribute('font-size',9.5*Math.max(.5,k)));
+  svg.classList.toggle('zoomed',s<.98);
+}
+function zoom(f,cx,cy){
+  const nw=Math.min(BASE.w*1.05,Math.max(BASE.w/14,view.w/f)); const r=nw/view.w;
+  if(cx===undefined){cx=view.x+view.w/2;cy=view.y+view.h/2;}
+  view={x:cx-(cx-view.x)*r,y:cy-(cy-view.y)*r,w:nw,h:view.h*r}; applyView();
+}
+function focusOn(xy,f){const nw=BASE.w/f,nh=BASE.h/f;view={x:xy[0]-nw/2,y:xy[1]-nh/2,w:nw,h:nh};applyView();}
+document.getElementById('zin').onclick=()=>zoom(1.6);
+document.getElementById('zout').onclick=()=>zoom(1/1.6);
+document.getElementById('zfit').onclick=()=>{view={...BASE};applyView();};
+function svgPt(e){const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;return p.matrixTransform(svg.getScreenCTM().inverse());}
+svg.addEventListener('wheel',e=>{e.preventDefault();const p=svgPt(e);zoom(e.deltaY<0?1.2:1/1.2,p.x,p.y);},{passive:false});
+let drag=null;
+svg.addEventListener('pointerdown',e=>{if(view.w/BASE.w>.98&&e.pointerType==='touch')return;drag={p:svgPt(e)};svg.classList.add('drag');svg.setPointerCapture(e.pointerId);});
+svg.addEventListener('pointermove',e=>{if(!drag)return;const p=svgPt(e);view.x-=p.x-drag.p.x;view.y-=p.y-drag.p.y;applyView();});
+const endDrag=()=>{drag=null;svg.classList.remove('drag');};
+svg.addEventListener('pointerup',endDrag);svg.addEventListener('pointercancel',endDrag);
+
+// ---------- time math ----------
+const $=id=>document.getElementById(id);
+function parseMS(s){s=String(s).trim();const p=s.split(':').map(Number);if(p.some(isNaN))return NaN;
+  if(p.length===1)return p[0]*60; if(p.length===2)return p[0]*60+p[1]; return p[0]*3600+p[1]*60+p[2];}
+function parseHMS(s){const p=String(s).trim().split(':').map(Number);if(p.some(isNaN)||p.length<2)return NaN;
+  return p.length===2?p[0]*3600+p[1]*60:p[0]*3600+p[1]*60+p[2];}
+const pad=n=>String(n).padStart(2,'0');
+function clock(sec,withSec){sec=Math.round(sec);if(!withSec)sec=Math.round(sec/60)*60;let h=Math.floor(sec/3600)%24,m=Math.floor(sec%3600/60),s=sec%60;
+  const ap=h>=12?'PM':'AM';h=h%12||12;return withSec?`${h}:${pad(m)}:${pad(s)} ${ap}`:`${h}:${pad(m)} ${ap}`;}
+const dur=s=>{s=Math.round(s);return `${Math.floor(s/3600)}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`;};
+const paceStr=s=>`${Math.floor(s/60)}:${pad(Math.round(s%60))}`;
+
+let S={}; // state
+function readState(){
+  const pace=parseMS($('pace').value); const band=Math.max(0,Math.min(50,Number($('band').value)||0))/100;
+  const st=$('start').value||'08:00'; const [hh,mm]=st.split(':').map(Number);
+  if(!(pace>0))return false;
+  S.start=hh*3600+mm*60; S.band=band;
+  S.paces={fast:pace*(1-band),base:pace,slow:pace*(1+band),limit:LIMIT_SEC/FULL};
+  return true;
+}
+function render(){
+  if(!readState())return;
+  const P_=S.paces;
+  $('paceFinish').textContent=`Finish ${dur(P_.base*FULL)} → ${clock(S.start+P_.base*FULL)}`;
+  $('bandHint').textContent=`${paceStr(P_.fast)} / ${paceStr(P_.slow)} per mile`;
+  $('hf').textContent=`Faster ${paceStr(P_.fast)}`;$('hb').textContent=`Base ${paceStr(P_.base)}`;$('hs').textContent=`Slower ${paceStr(P_.slow)}`;$('hl').textContent=`Limit ${paceStr(P_.limit)}`;
+  $('legend').innerHTML=RUN.map(r=>`<span><i class="dot" style="${r.key==='limit'?'border:2px dashed '+r.col+';background:transparent':'background:'+r.col}"></i>${NAME[r.key]} · ${paceStr(P_[r.key])}/mi · ${dur(P_[r.key]*FULL)}</span>`).join('');
+  // slider range: start → slow finish + 15 min
+  const maxMin=Math.ceil((Math.max(P_.slow*FULL,LIMIT_SEC)+900)/60);
+  const sl=$('slider'); sl.max=maxMin;
+  if(S.offset===undefined) S.offset=Math.round(P_.base*10/60); // default: base runner at mile 10
+  S.offset=Math.min(S.offset,maxMin); sl.value=S.offset;
+  // table
+  $('splits').innerHTML=MARKERS.filter(m=>m.mile>0).map(m=>{
+    const key=m.mile===FULL||(m.mile>13&&m.mile<14);
+    return `<tr data-mile="${m.mile}" class="${key?'key':''}"><td class="m">${m.mile===FULL?'26.2':m.mile>13&&m.mile<14?'13.1':m.mile}</td><td class="loc">${m.label}<small>${m.hood}</small></td>`+
+    ['fast','base','slow','limit'].map((k,i)=>`<td class="t ${'fbsl'[i]}">${clock(S.start+P_[k]*m.mile)}</td>`).join('')+'</tr>';
+  }).join('');
+  $('splits').querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{const m=MARKERS.find(x=>String(x.mile)===tr.dataset.mile);focusOn(m.xy,2.6);if(innerWidth<=860)document.querySelector('.mappanel').scrollIntoView({behavior:'smooth',block:'start'});}));
+  update();
+}
+function describe(mile){
+  if(mile<=0)return {txt:'Waiting in the corral',sub:'Not started'};
+  if(mile>=FULL)return {txt:'Finished · Grant Park',sub:''};
+  let prev=MARKERS[0],next=MARKERS[MARKERS.length-1];
+  for(let i=0;i<MARKERS.length;i++){if(MARKERS[i].mile<=mile)prev=MARKERS[i];else{next=MARKERS[i];break;}}
+  return {txt:`${prev.hood} · heading to ${next.label.replace(/^(Half|Finish) · /,'')}`,sub:''};
+}
+function update(){
+  const t=S.start+S.offset*60;
+  $('nowLabel').textContent=clock(t);
+  $('at').value=`${pad(Math.floor(t/3600)%24)}:${pad(Math.floor(t%3600/60))}`;
+  const elapsed=S.offset*60;
+  const cards=[];
+  RUN.forEach(r=>{
+    const mile=elapsed/S.paces[r.key]; const xy=posAtMile(mile);
+    r.g.setAttribute('transform',`translate(${xy[0]},${xy[1]})`);
+    if(r.key!=='limit')r.pulse.style.display=(mile>0&&mile<FULL)?'':'none';
+    const ds=describe(mile); const fin=S.start+S.paces[r.key]*FULL;
+    const nm=NAME[r.key];
+    const mileTxt=mile<=0?'0.0':mile>=FULL?'26.2':mile.toFixed(1);
+    cards.push(`<div class="card" style="--c:${r.col}${r.key==='limit'?';--bs:dashed':''}"><span class="lab">${nm} · ${paceStr(S.paces[r.key])}/mi</span><span class="mile">${mileTxt}<small>mi</small></span><span class="where">${ds.txt}</span><span class="meta">${r.key==='limit'?'6:30:00 cutoff → '+clock(fin):mile>=FULL?'Finished at '+clock(fin):'Finish ≈ '+clock(fin)}</span></div>`);
+  });
+  $('cards').innerHTML=cards.join('');
+  const bm=elapsed/S.paces.base;
+  // progress overlay for base runner
+  const prog=[]; for(let i=0;i<pts.length;i++){if(mileAt[i]<=bm)prog.push(pts[i]);else break;}
+  if(bm>0){prog.push(posAtMile(bm));progress.setAttribute('d',d(prog));}else progress.setAttribute('d','');
+  $('splits').querySelectorAll('tr').forEach(tr=>tr.classList.toggle('passed',Number(tr.dataset.mile)<=bm));
+}
+
+['pace','band','start'].forEach(id=>$(id).addEventListener('input',()=>{if(id==='pace')$('goal').value='';render();}));
+$('goal').addEventListener('input',()=>{const g=parseHMS($('goal').value);if(g>3600){const p=g/FULL;$('pace').value=paceStr(p);render();}});
+$('slider').addEventListener('input',e=>{S.offset=Number(e.target.value);update();});
+$('at').addEventListener('input',e=>{if(!e.target.value)return;const [h,m]=e.target.value.split(':').map(Number);let off=Math.round((h*3600+m*60-S.start)/60);
+  off=Math.max(0,Math.min(Number($('slider').max),off));S.offset=off;$('slider').value=off;update();});
+let timer=null;
+$('play').addEventListener('click',()=>{
+  if(timer){clearInterval(timer);timer=null;$('play').textContent='▶ Play';return;}
+  if(S.offset>=Number($('slider').max))S.offset=0;
+  $('play').textContent='❚❚ Pause';
+  timer=setInterval(()=>{S.offset+=2;if(S.offset>=Number($('slider').max)){S.offset=Number($('slider').max);clearInterval(timer);timer=null;$('play').textContent='▶ Play';}
+    $('slider').value=S.offset;update();},60);
+});
+applyView(); render();
+</script>
+
+</body>
+</html>
